@@ -1,0 +1,249 @@
+name: CI - Model Training & Testing
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'model/**'
+      - 'requirements.txt'
+      - '.github/workflows/CI.yaml'
+      - 'app.py'
+      - 'wsgi.py'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'model/**'
+      - 'requirements.txt'
+      - '.github/workflows/CI.yaml'
+      - 'app.py'
+      - 'wsgi.py'
+
+jobs:
+  # Job 1: Code quality checks and linting
+  code-quality:
+    runs-on: ubuntu-latest
+    name: Code Quality & Linting
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pylint flake8 black isort
+
+      - name: Run Black formatting check
+        run: black --check . --exclude venv
+
+      - name: Run isort import sorting check
+        run: isort --check-only . --skip venv
+
+      - name: Run Flake8 linting
+        run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=venv,__pycache__
+        continue-on-error: true
+
+  # Job 2: Unit tests
+  unit-tests:
+    runs-on: ubuntu-latest
+    name: Unit Tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pytest
+        run: |
+          pip install pytest pytest-cov
+          pytest tests/ -v --cov=. --cov-report=xml --cov-report=html
+        continue-on-error: false
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  # Job 3: Model training and artifact generation
+  model-training:
+    runs-on: ubuntu-latest
+    name: Train & Validate Model
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Train intent classification model
+        run: |
+          echo "Training model..."
+          python model/train.py
+          echo "Model training completed"
+
+      - name: Validate model artifacts
+        run: |
+          python -c "
+          import os
+          import joblib
+          model_path = 'model/artifacts/intent_model.pkl'
+          if os.path.exists(model_path):
+              model = joblib.load(model_path)
+              print(f'Model artifact exists: {model_path}')
+              print(f'Model type: {type(model).__name__}')
+          else:
+              print(f'Model artifact not found: {model_path}')
+              exit(1)
+          "
+
+      - name: Test model predictions
+        run: |
+          python -c "
+          import joblib
+          model = joblib.load('model/artifacts/intent_model.pkl')
+          test_cases = [
+              'hi',
+              'reset my password',
+              'cancel subscription',
+              'great service'
+          ]
+          print('Testing predictions:')
+          for text in test_cases:
+              pred = model.predict([text])
+              print(f'  • \"{text}\" -> {pred[0]}')
+          "
+
+      - name: Upload model artifact
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: intent-model-artifact
+          path: model/artifacts/intent_model.pkl
+          retention-days: 30
+
+  # Job 4: Integration tests
+  integration-tests:
+    needs: model-training
+    runs-on: ubuntu-latest
+    name: Integration Tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Start Flask app in background
+        run: |
+          python app.py &
+          sleep 2
+          echo "Flask app started"
+
+      - name: Test health endpoint
+        run: |
+          curl -X GET http://localhost:6000/health \
+            -H "Content-Type: application/json" \
+            -w "\nStatus: %{http_code}\n"
+
+      - name: Test predict endpoint
+        run: |
+          curl -X POST http://localhost:6000/predict \
+            -H "Content-Type: application/json" \
+            -d '{"text": "Can you help me reset my password?"}' \
+            -w "\nStatus: %{http_code}\n"
+
+      - name: Kill Flask app
+        run: pkill -f "python app.py"
+        if: always()
+
+  # Job 5: Build Docker image (dry-run on PR)
+  docker-build:
+    needs: [code-quality, unit-tests, model-training, integration-tests]
+    runs-on: ubuntu-latest
+    name: Build Docker Image
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build Docker image (dry-run)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: mlops-intent-classifier-model:test-build
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Job 6: Generate test report and summary
+  test-summary:
+    if: always()
+    needs: [code-quality, unit-tests, model-training, integration-tests, docker-build]
+    runs-on: ubuntu-latest
+    name: Test Summary
+    steps:
+      - name: Check job status
+        run: |
+          echo "## CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Quality | ${{ needs.code-quality.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests | ${{ needs.unit-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Model Training | ${{ needs.model-training.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integration Tests | ${{ needs.integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Build | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.code-quality.result }}" == "failure" ]] || \
+             [[ "${{ needs.unit-tests.result }}" == "failure" ]] || \
+             [[ "${{ needs.model-training.result }}" == "failure" ]] || \
+             [[ "${{ needs.integration-tests.result }}" == "failure" ]] || \
+             [[ "${{ needs.docker-build.result }}" == "failure" ]]; then
+            echo "CI Pipeline FAILED"
+            exit 1
+          else
+            echo "CI Pipeline PASSED"
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "Some CI checks failed. Please review the logs above."
