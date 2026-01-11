@@ -222,8 +222,7 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: mlops-intent-classifier-model:test-build
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          load: true
 
   # Job 5b: Build & Push Docker image to Docker Hub
   docker-push:
