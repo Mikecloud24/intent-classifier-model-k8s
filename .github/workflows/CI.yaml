@@ -92,7 +92,7 @@ jobs:
           name: codecov-umbrella
           fail_ci_if_error: false
 
-  # Job 3: Model training and artifact generation
+  # Job 3: Model training and artifact generation stage
   model-training:
     runs-on: ubuntu-latest
     name: Train & Validate Model
