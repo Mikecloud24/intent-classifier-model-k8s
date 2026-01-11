@@ -1,5 +1,6 @@
 import joblib
 
+
 class IntentModel:
     def __init__(self, path="model/artifacts/intent_model.pkl"):
         self.pipeline = joblib.load(path)

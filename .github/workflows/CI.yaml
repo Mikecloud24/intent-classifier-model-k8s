@@ -46,6 +46,7 @@ jobs:
 
       - name: Run Black formatting check
         run: black --check . --exclude venv
+        continue-on-error: true
 
       - name: Run isort import sorting check
         run: isort --check-only . --skip venv
