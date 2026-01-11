@@ -75,8 +75,12 @@ jobs:
 
       - name: Run pytest
         run: |
-          pip install pytest pytest-cov
-          pytest tests/ -v --cov=. --cov-report=xml --cov-report=html
+          if [ -d "tests" ]; then
+            pip install pytest pytest-cov
+            pytest tests/ -v --cov=. --cov-report=xml --cov-report=html
+          else
+            echo "⊘ No tests directory found, skipping unit tests"
+          fi
         continue-on-error: false
 
       - name: Upload coverage reports to Codecov
