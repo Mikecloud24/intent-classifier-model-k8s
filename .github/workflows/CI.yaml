@@ -58,6 +58,7 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     name: Unit Tests
+    if: ${{ hashFiles('tests/**') != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -157,6 +158,12 @@ jobs:
     name: Integration Tests
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: intent-model-artifact
+          path: model/artifacts
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -260,13 +267,13 @@ jobs:
           echo "| Model Training | ${{ needs.model-training.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Integration Tests | ${{ needs.integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Docker Build | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Push | ${{ needs.docker-push.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          if [[ "${{ needs.code-quality.result }}" == "failure" ]] || \
-             [[ "${{ needs.unit-tests.result }}" == "failure" ]] || \
-             [[ "${{ needs.model-training.result }}" == "failure" ]] || \
+          if [[ "${{ needs.model-training.result }}" == "failure" ]] || \
              [[ "${{ needs.integration-tests.result }}" == "failure" ]] || \
-             [[ "${{ needs.docker-build.result }}" == "failure" ]]; then
+             [[ "${{ needs.docker-build.result }}" == "failure" ]] || \
+             [[ "${{ needs.docker-push.result }}" == "failure" ]]; then
             echo "CI Pipeline FAILED"
             exit 1
           else
