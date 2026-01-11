@@ -220,9 +220,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          push: true
+          push: false
           tags: mlops-intent-classifier-model:test-build
-          load: true
 
   # Job 5b: Build & Push Docker image to Docker Hub
   docker-push:
